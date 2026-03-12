@@ -1,135 +1,77 @@
-import pandas as pd
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import accuracy_score
-from xgboost import XGBClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report
+import joblib
+import os
 
-# ==============================
-# 1️⃣ Load Clean Data
-# ==============================
+from main import fetch_stock_data
 
-df = pd.read_csv("clean_stock_data.csv")
+if not os.path.exists("models"):
+    os.makedirs("models")
 
-df['Close'] = pd.to_numeric(df['Close'], errors='coerce')
-df['Volume'] = pd.to_numeric(df['Volume'], errors='coerce')
-
-df.dropna(inplace=True)
-
-# ==============================
-# 2️⃣ Feature Engineering
-# ==============================
-
-df['Price_Change'] = df['Close'].pct_change()
-df['MA_10'] = df['Close'].rolling(10).mean()
-df['MA_20'] = df['Close'].rolling(20).mean()
-df['MA_50'] = df['Close'].rolling(50).mean()
-
-df['Volatility'] = df['Close'].rolling(10).std()
-
-# RSI
-delta = df['Close'].diff()
-gain = (delta.where(delta > 0, 0)).rolling(14).mean()
-loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-rs = gain / loss
-df['RSI'] = 100 - (100 / (1 + rs))
-
-# Momentum
-df['Momentum'] = df['Close'] - df['Close'].shift(5)
-
-df.dropna(inplace=True)
-
-# ==============================
-# 3️⃣ NEW TARGET (Trend Based)
-# ==============================
-
-# Predict short-term trend instead of raw return
-df['Target'] = (df['MA_10'] > df['MA_20']).astype(int)
-
-print("Target Distribution:")
-print(df['Target'].value_counts(normalize=True))
-
-# ==============================
-# 4️⃣ Define Features & Target
-# ==============================
-
-features = [
-    'MA_10', 'MA_20', 'MA_50',
-    'Volume',
-    'Price_Change',
-    'Volatility',
-    'RSI',
-    'Momentum'
+stocks = [
+    "ASIANPAINT.NS",
+    "BHARTIARTL.NS",
+    "HDFCBANK.NS",
+    "ICICIBANK.NS",
+    "INFY.NS",
+    "ITC.NS",
+    "LT.NS",
+    "RELIANCE.NS",
+    "SBIN.NS",
+    "TCS.NS",
 ]
 
-X = df[features]
-y = df['Target']
+print("\nProfessional 5-Day AI Trading Signals:\n")
 
-# ==============================
-# 5️⃣ Train-Test Split (Time Based)
-# ==============================
+for stock in stocks:
 
-split = int(len(df) * 0.8)
+    X, y, data = fetch_stock_data(stock)
 
-X_train = X[:split]
-X_test = X[split:]
+    if X.empty or y.empty:
+        print(f"No training data for {stock}, skipping...")
+        continue
 
-y_train = y[:split]
-y_test = y[split:]
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.2,
+        shuffle=False
+    )
 
-# ==============================
-# 6️⃣ Scaling
-# ==============================
+    model = RandomForestClassifier(
+        n_estimators=1000,
+        max_depth=18,
+        min_samples_split=5,
+        min_samples_leaf=2,
+        class_weight="balanced",
+        random_state=42
+    )
 
-scaler = StandardScaler()
-X_train = scaler.fit_transform(X_train)
-X_test = scaler.transform(X_test)
+    model.fit(X_train, y_train)
 
-# ==============================
-# 7️⃣ XGBoost Model
-# ==============================
+    y_pred = model.predict(X_test)
 
-model = XGBClassifier(
-    n_estimators=600,
-    max_depth=5,
-    learning_rate=0.1,
-    subsample=0.9,
-    colsample_bytree=0.9,
-    random_state=42,
-    eval_metric='logloss'
-)
+    accuracy = accuracy_score(y_test, y_pred)
 
-model.fit(X_train, y_train)
+    print(f"\nReport for {stock.replace('.NS','')}")
+    print(classification_report(y_test, y_pred, zero_division=0))
 
-# ==============================
-# 8️⃣ Prediction & Accuracy
-# ==============================
+    latest = X.tail(1)
+    signal = model.predict(latest)[0]
 
-predictions = model.predict(X_test)
+    if signal == 2:
+        signal_text = "BUY"
+    elif signal == 0:
+        signal_text = "SELL"
+    else:
+        signal_text = "HOLD"
 
-accuracy = accuracy_score(y_test, predictions)
+    print(
+        f"{stock.replace('.NS','')}: Accuracy = {accuracy:.2f} | Current Signal = {signal_text}"
+    )
 
-print("Model Accuracy:", accuracy)
+    model_path = f"models/{stock.replace('.NS','')}_model.pkl"
+    joblib.dump(model, model_path)
 
-
-
-
-
-
-# ==============================
-# 9️⃣ Latest Signal Output
-# ==============================
-
-latest_prediction = model.predict(X_test[-1].reshape(1, -1))[0]
-
-if latest_prediction == 1:
-    signal = "BUY"
-else:
-    signal = "SELL"
-
-print("Latest Trading Signal:", signal)
-
-print("Last 5 Predictions:")
-print(predictions[-5:])
-
-
-print("Prediction Distribution:")
-print(pd.Series(predictions).value_counts(normalize=True))
+print("\nAll models trained and saved successfully.")

@@ -1,36 +1,89 @@
 import yfinance as yf
 import pandas as pd
-import matplotlib.pyplot as plt
+import numpy as np
 
-# Step 1: Download Stock Data
-stock = "TCS.NS"
-data = yf.download(stock, start="2023-01-01", end="2024-01-01")
+def fetch_stock_data(stock):
 
-print("Raw Data:")
-print(data.head())
+    data = yf.download(stock, period="10y", interval="1d")
 
-# Step 2: Clean Data
-data = data.dropna()
-data = data.reset_index()
-data['Date'] = pd.to_datetime(data['Date'])
+    if data.empty:
+        return pd.DataFrame(), pd.Series(), data
 
-# Step 3: Feature Engineering
-data['MA_10'] = data['Close'].rolling(10).mean()
-data['MA_50'] = data['Close'].rolling(50).mean()
-data['Daily_Return'] = data['Close'].pct_change()
-data['Volatility'] = data['Daily_Return'].rolling(10).std()
+    data = data.reset_index()
 
-data = data.dropna()
+    # Moving averages
+    data["MA10"] = data["Close"].rolling(10).mean()
+    data["MA20"] = data["Close"].rolling(20).mean()
+    data["MA50"] = data["Close"].rolling(50).mean()
 
-# Step 4: Save Clean Data
-data.to_csv("clean_stock_data.csv", index=False)
+    # Returns
+    data["Return"] = data["Close"].pct_change()
 
-print("Feature Engineering Completed")
-print(data.head())
+    # RSI
+    delta = data["Close"].diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
 
-# Step 5: Visualization
-plt.figure(figsize=(10,5))
-plt.plot(data['Date'], data['Close'], label="Close Price")
-plt.plot(data['Date'], data['MA_10'], label="MA 10")
-plt.legend()
-plt.show()
+    avg_gain = gain.rolling(14).mean()
+    avg_loss = loss.rolling(14).mean()
+
+    rs = avg_gain / avg_loss
+    data["RSI"] = 100 - (100 / (1 + rs))
+
+    # MACD
+    ema12 = data["Close"].ewm(span=12, adjust=False).mean()
+    ema26 = data["Close"].ewm(span=26, adjust=False).mean()
+
+    data["MACD"] = ema12 - ema26
+    data["MACD_signal"] = data["MACD"].ewm(span=9, adjust=False).mean()
+
+    # Volatility
+    data["Volatility"] = data["Return"].rolling(10).std()
+
+    # Volume change
+    data["Volume_Change"] = data["Volume"].pct_change()
+
+    # Momentum
+    data["Momentum"] = data["Close"].pct_change(3)
+
+    # Future return
+    data["Future_Return"] = data["Close"].shift(-5) / data["Close"] - 1
+
+    # BUY SELL HOLD
+    def signal(x):
+        if x > 0.02:
+            return 2
+        elif x < -0.02:
+            return 0
+        else:
+            return 1
+
+    data["Signal"] = data["Future_Return"].apply(signal)
+
+    # Remove infinity
+    data.replace([np.inf, -np.inf], np.nan, inplace=True)
+
+    # Remove NaN
+    data.dropna(inplace=True)
+
+    if len(data) < 200:
+        return pd.DataFrame(), pd.Series(), data
+
+    features = data[
+        [
+            "MA10",
+            "MA20",
+            "MA50",
+            "Return",
+            "RSI",
+            "MACD",
+            "MACD_signal",
+            "Volatility",
+            "Volume_Change",
+            "Momentum"
+        ]
+    ]
+
+    target = data["Signal"]
+
+    return features, target, data
