@@ -1,12 +1,3 @@
-Stock Market Data Analysis using Yahoo Finance API
-
-Objective:
-To fetch stock data using Yahoo Finance and perform data cleaning and feature engineering.
-
-Features Created:
-- Moving Average (10, 50)
-- Daily Return
-- Volatility
-
-Tools Used:
-Python, yfinance, pandas, matplotlib
+AI Stock Trading Dashboard
+Machine Learning based Buy/Sell prediction system built using Python, RandomForest, and Streamlit.
+This project is created for learning and portfolio purposes.
