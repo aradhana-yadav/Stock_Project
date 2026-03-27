@@ -1,165 +1,174 @@
 import streamlit as st
-import joblib
-import pandas as pd
-import matplotlib.pyplot as plt
-from main import fetch_stock_data
+import plotly.graph_objects as go
+from main import run_all
+from email_alert import send_email_alert
 
-st.set_page_config(
-    page_title="AI Trading Dashboard",
-    page_icon="📈",
-    layout="wide"
-)
+# ---------------- PAGE CONFIG ----------------
+st.set_page_config(page_title="AI Trading Dashboard", layout="wide")
 
-# ----------- DARK THEME STYLE -----------
-
+# ---------------- CUSTOM CSS ----------------
 st.markdown("""
 <style>
-
-[data-testid="stAppViewContainer"]{
-background: linear-gradient(135deg,#0f2027,#203a43,#2c5364);
-color:white;
+body {
+    background-color: #0E1117;
 }
-
-h1,h2,h3{
-color:white;
+.block-container {
+    padding-top: 1.5rem;
 }
-
+.card {
+    background: linear-gradient(145deg, #161B22, #1c222c);
+    padding: 18px;
+    border-radius: 14px;
+    box-shadow: 0 6px 12px rgba(0,0,0,0.4);
+}
+.section-title {
+    font-size: 20px;
+    font-weight: 600;
+    margin-top: 20px;
+    margin-bottom: 10px;
+}
 </style>
-""",unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-# ----------- TITLE -----------
-
-st.title("📈 AI Stock Trading Dashboard")
-st.write("Machine Learning Based Buy / Sell Prediction System")
-
-# ----------- STOCK LIST -----------
-
-stocks = [
-"ASIANPAINT.NS",
-"BHARTIARTL.NS",
-"HDFCBANK.NS",
-"ICICIBANK.NS",
-"INFY.NS",
-"ITC.NS",
-"LT.NS",
-"RELIANCE.NS",
-"SBIN.NS",
-"TCS.NS"
-]
-
-stock = st.selectbox("Select Stock", stocks)
-
-# ----------- LOAD DATA -----------
-
+# ---------------- LOAD DATA ----------------
 @st.cache_data
-def load_data(stock):
-    X, y, data = fetch_stock_data(stock)
-    return X, data
+def load_data():
+    return run_all()
 
-X, data = load_data(stock)
+results = load_data()
 
-# ----------- LOAD MODEL -----------
+# ---------------- SIDEBAR ----------------
+st.sidebar.title("⚙️ Controls")
 
-model_path = f"models/{stock.replace('.NS','')}_model.pkl"
-model = joblib.load(model_path)
+stock_list = [res["stock"] for res in results]
+selected_stock = st.sidebar.selectbox("📌 Select Stock", stock_list)
 
-prediction = model.predict(X.tail(1))[0]
+selected_data = next(res for res in results if res["stock"] == selected_stock)
 
-if prediction == 2:
-    signal = "BUY"
-elif prediction == 0:
-    signal = "SELL"
-else:
-    signal = "HOLD"
+# ---------------- HEADER ----------------
+st.title("📊 AI Trading Dashboard")
 
-# ----------- METRICS -----------
+# ---------------- SIGNAL ----------------
+signal = selected_data["signal"]
+color = "#00FF9C" if signal == "BUY" else "#FF4B4B" if signal == "SELL" else "#FFA500"
 
-latest_price = float(data["Close"].iloc[-1])
-prev_price = float(data["Close"].iloc[-2])
-
-change = latest_price - prev_price
-change_percent = (change / prev_price) * 100
-
+# ---------------- METRICS ----------------
 col1, col2, col3, col4 = st.columns(4)
 
-col1.metric("AI Signal", signal)
-col2.metric("Current Price", round(latest_price,2))
-col3.metric("Daily Change", round(change,2))
-col4.metric("Change %", round(change_percent,2))
+with col1:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.metric("Accuracy", f"{selected_data['accuracy']*100:.2f}%")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-st.divider()
+with col2:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.metric("Strategy Return", f"{selected_data['strategy_return']:.2f}x")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-# ----------- CHART SECTION -----------
+with col3:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.metric("Market Return", f"{selected_data['market_return']:.2f}x")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+with col4:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color:{color}'>Signal: {signal}</h3>", unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ---------------- CONTROL PANEL ----------------
+st.markdown("---")
+st.markdown('<div class="section-title">⚡ Controls Panel</div>', unsafe_allow_html=True)
+
+c1, c2, c3 = st.columns(3)
+
+# Alert
+with c1:
+    if st.button("📧 Send Alert"):
+        send_email_alert(signal, selected_stock, "aaradhanay8@gmail.com")
+        st.success("Alert Sent!")
+
+# Backtesting dropdown
+with c2:
+    graph_type = st.selectbox("📊 Backtest View", [
+        "Strategy vs Market",
+        "Only Strategy",
+        "Only Market"
+    ])
+
+# Graph style dropdown
+with c3:
+    chart_style = st.selectbox("📈 Chart Type", [
+        "Line",
+        "Area"
+    ])
+
+# ---------------- BACKTESTING METRICS ----------------
+st.markdown("---")
+st.markdown('<div class="section-title">📊 Backtesting Metrics</div>', unsafe_allow_html=True)
+
+metrics = selected_data["metrics"]
+
+m1, m2, m3 = st.columns(3)
+m1.metric("Sharpe Ratio", f"{metrics['Sharpe']:.2f}")
+m2.metric("Max Drawdown", f"{metrics['Max Drawdown']:.2f}")
+m3.metric("Win Rate", f"{metrics['Win Rate']*100:.2f}%")
+
+# ---------------- CHARTS ----------------
+st.markdown("---")
+st.markdown('<div class="section-title">📈 Charts</div>', unsafe_allow_html=True)
+
+df = selected_data["df"]
 
 col1, col2 = st.columns(2)
 
-# PRICE + MOVING AVERAGE
+# -------- PRICE CHART --------
 with col1:
+    fig1 = go.Figure()
 
-    st.subheader("📉 Price & Moving Average")
+    if chart_style == "Area":
+        fig1.add_trace(go.Scatter(
+            x=df.index,
+            y=df['Close'],
+            fill='tozeroy',
+            name="Price"
+        ))
+    else:
+        fig1.add_trace(go.Scatter(
+            x=df.index,
+            y=df['Close'],
+            name="Price"
+        ))
 
-    fig, ax = plt.subplots(figsize=(8,4))
+    fig1.update_layout(
+        title="Stock Price",
+        template="plotly_dark",
+        hovermode="x unified"
+    )
+    st.plotly_chart(fig1, use_container_width=True)
 
-    ax.plot(data["Close"].tail(200), label="Close Price", linewidth=2)
-    ax.plot(data["MA10"].tail(200), label="MA10", linewidth=2)
-    ax.plot(data["MA20"].tail(200), label="MA20", linewidth=2)
-
-    ax.set_facecolor("#0E1117")
-    fig.patch.set_facecolor("#0E1117")
-
-    ax.tick_params(colors="white")
-
-    ax.legend()
-
-    ax.grid(alpha=0.3)
-
-    st.pyplot(fig)
-
-# RSI CHART
+# -------- BACKTEST GRAPH --------
 with col2:
+    fig2 = go.Figure()
 
-    st.subheader("📊 RSI Indicator")
+    if graph_type == "Strategy vs Market":
+        fig2.add_trace(go.Scatter(x=df.index, y=df['Cumulative_Strategy'], name="Strategy"))
+        fig2.add_trace(go.Scatter(x=df.index, y=df['Cumulative_Market'], name="Market"))
 
-    fig2, ax2 = plt.subplots(figsize=(8,4))
+    elif graph_type == "Only Strategy":
+        fig2.add_trace(go.Scatter(x=df.index, y=df['Cumulative_Strategy'], name="Strategy"))
 
-    ax2.plot(data["RSI"].tail(200), linewidth=2)
+    else:
+        fig2.add_trace(go.Scatter(x=df.index, y=df['Cumulative_Market'], name="Market"))
 
-    ax2.axhline(70, linestyle="--")
-    ax2.axhline(30, linestyle="--")
+    fig2.update_layout(
+        title="Backtesting Graph",
+        template="plotly_dark",
+        hovermode="x unified"
+    )
+    st.plotly_chart(fig2, use_container_width=True)
 
-    ax2.set_facecolor("#0E1117")
-    fig2.patch.set_facecolor("#0E1117")
+# ---------------- DATA TABLE ----------------
+st.markdown("---")
+st.markdown('<div class="section-title">📋 Recent Data</div>', unsafe_allow_html=True)
 
-    ax2.tick_params(colors="white")
-
-    ax2.grid(alpha=0.3)
-
-    st.pyplot(fig2)
-
-st.divider()
-
-# ----------- FEATURE IMPORTANCE -----------
-
-st.subheader("🧠 AI Feature Importance")
-
-importance = model.feature_importances_
-features = X.columns
-
-imp_df = pd.DataFrame({
-"Feature":features,
-"Importance":importance
-}).sort_values("Importance",ascending=False)
-
-st.bar_chart(imp_df.set_index("Feature"))
-
-st.divider()
-
-# ----------- MARKET DATA -----------
-
-st.subheader("📋 Recent Market Data")
-
-st.dataframe(data.tail(20))
-
-st.divider()
-
-st.caption("AI Trading System | RandomForest ML Model | Streamlit Dashboard")
+st.dataframe(df.tail(), use_container_width=True)
